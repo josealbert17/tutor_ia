@@ -1,7 +1,7 @@
 {
   "name": "tutor-ia-dashboard",
-  "version": "1.0.0",
-  "description": "Dashboard de análisis de consultas del Tutor IA",
+  "version": "2.0.0",
+  "description": "Dashboard de análisis de consultas del Tutor IA con clasificación automática",
   "type": "module",
   "scripts": {
     "dev": "vite",

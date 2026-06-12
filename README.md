@@ -1,46 +1,52 @@
-# Dashboard Análisis Tutor IA
+# Dashboard Tutor IA v2.0
 
-Dashboard interactivo para analizar registros de consultas al tutor IA del aula virtual.
-Soporta carga desde archivo Excel y conexión en tiempo real con Google Sheets.
-
----
-
-## Despliegue rápido
-
-### Opción A — Vercel (recomendado)
-
-1. Crea una cuenta en https://vercel.com (gratis)
-2. Instala la CLI: `npm install -g vercel`
-3. En la carpeta del proyecto:
-```bash
-npm install
-vercel --prod
-```
-4. Sigue las instrucciones en pantalla (acepta los valores por defecto)
-5. Vercel te dará una URL pública como `https://tutor-ia-dashboard.vercel.app`
-
-**O desde la web:**
-1. Sube la carpeta a GitHub
-2. En vercel.com → New Project → importa el repositorio
-3. Clic en Deploy (configuración automática detectada)
+Análisis de consultas del Tutor IA con clasificación automática de temáticas usando OpenAI.
 
 ---
 
-### Opción B — Netlify
+## Estructura del proyecto
 
-1. Crea una cuenta en https://netlify.com (gratis)
-2. Instala la CLI: `npm install -g netlify-cli`
-3. En la carpeta del proyecto:
-```bash
-npm install
-npm run build
-netlify deploy --prod --dir=dist
+```
+tutor-ia-dashboard/
+├── api/
+│   └── clasificar.js     ← Proxy seguro hacia OpenAI (la API key vive aquí)
+├── src/
+│   ├── main.jsx
+│   └── App.jsx           ← Dashboard completo
+├── index.html
+├── package.json
+├── vite.config.js
+└── vercel.json
 ```
 
-**O desde la web (drag & drop):**
-1. Ejecuta `npm install && npm run build`
-2. En app.netlify.com → Sites → arrastra la carpeta `dist/`
-3. Netlify despliega automáticamente
+---
+
+## Deploy en Vercel (recomendado)
+
+### 1. Subir a GitHub
+```bash
+git init
+git add .
+git commit -m "Dashboard Tutor IA v2"
+git remote add origin https://github.com/TU_USUARIO/tutor-ia-dashboard.git
+git push -u origin main
+```
+
+### 2. Importar en Vercel
+1. Ir a https://vercel.com → New Project
+2. Importar el repositorio de GitHub
+3. Clic en **Deploy** (Vercel detecta Vite automáticamente)
+
+### 3. ⚠️ Configurar la API Key de OpenAI (IMPORTANTE)
+1. En Vercel → tu proyecto → **Settings** → **Environment Variables**
+2. Agregar:
+   - **Name:** `OPENAI_API_KEY`
+   - **Value:** `sk-proj-...` (tu clave de OpenAI)
+   - **Environment:** Production, Preview, Development
+3. Clic en **Save**
+4. Ir a **Deployments** → clic en los tres puntos → **Redeploy**
+
+La API key **nunca aparece en el navegador**. Solo vive en el servidor de Vercel.
 
 ---
 
@@ -51,42 +57,46 @@ npm install
 npm run dev
 ```
 
-Abre http://localhost:5173
-
----
-
-## Estructura del proyecto
-
+Para probar la clasificación con IA en local, crea un archivo `.env.local`:
 ```
-tutor-ia-dashboard/
-├── src/
-│   ├── main.jsx        # Punto de entrada React
-│   └── App.jsx         # Dashboard completo
-├── index.html          # HTML base
-├── package.json        # Dependencias
-├── vite.config.js      # Configuración Vite
-├── vercel.json         # Configuración Vercel
-└── netlify.toml        # Configuración Netlify
+OPENAI_API_KEY=sk-proj-...
+```
+Luego instala Vercel CLI para emular las API routes:
+```bash
+npm install -g vercel
+vercel dev
 ```
 
 ---
 
-## Conectar Google Sheets (tiempo real)
+## Cómo funciona la clasificación IA
 
-Una vez desplegado, el dashboard se conecta automáticamente al Google Sheet configurado.
-La URL está pre-configurada en `src/App.jsx`.
+1. El usuario carga su Excel o conecta Google Sheets
+2. Va a la pestaña **🤖 Temáticas IA**
+3. Pulsa **Clasificar con IA**
+4. El dashboard envía las consultas en lotes de 30 al endpoint `/api/clasificar`
+5. El servidor (Vercel) llama a OpenAI con la clave segura
+6. OpenAI devuelve: temática, subtema, tipo y profundidad para cada consulta
+7. El dashboard actualiza en tiempo real con barra de progreso
+8. Al terminar, se puede exportar a Excel con la columna de temática incluida
 
-Para cambiarla, busca esta línea y reemplaza con tu URL:
-```js
-const [sheetsUrl, setSheetsUrl] = useState('TU_URL_AQUI');
-```
+### Temáticas detectadas automáticamente
+OpenAI identifica las categorías que existan en los datos. Ejemplos típicos:
+- Comprensión de contenido
+- Evaluaciones y notas
+- Navegación del aula virtual
+- Tareas y entregables
+- Soporte técnico
+- Dudas procedimentales
 
 ---
 
-## Dependencias principales
-
-- React 18
-- Recharts (gráficos)
-- SheetJS / xlsx (lectura Excel)
-- PapaParse (lectura CSV)
-- Vite (build)
+## Columnas esperadas en el Excel
+El dashboard intenta detectar automáticamente los nombres de columna. Funciona mejor si incluye:
+- Consulta / Pregunta / Texto
+- Respuesta (opcional)
+- Nombre del curso / Curso
+- Código del curso
+- NRC / Sección
+- Fecha / Timestamp
+- Bloque, Período, Campus (opcionales)
