@@ -65,39 +65,62 @@ function parseFile(file, callback) {
   }
 }
 
+// Columnas exactas del Google Sheet de UC:
+// User ID | USUARIO | CONSULTA | RESPUESTA DE LA IA | URL DEL CURSO |
+// NOMBRE DEL CURSO | CODIGO DEL CURSO | NRC | BLOQUE | PERIODO | CAMPUS | HORA | FECHA
 function normalizeRows(raw) {
   return raw.map(r => {
-    const keys = Object.keys(r)
-    const get = (...opts) => {
-      for (const o of opts) {
-        const k = keys.find(k => k.toLowerCase().includes(o.toLowerCase()))
+    // Intentar primero con nombres exactos del Sheet UC, luego fallback genérico
+    const col = (exact, ...fallbacks) => {
+      if (r[exact] !== undefined && r[exact] !== '') return r[exact]
+      const keys = Object.keys(r)
+      for (const f of fallbacks) {
+        const k = keys.find(k => k.toLowerCase().includes(f.toLowerCase()))
         if (k && r[k] !== '') return r[k]
       }
       return ''
     }
-    const fechaRaw = get('fecha', 'date', 'timestamp', 'hora')
+
+    // Fecha: la columna FECHA contiene la fecha, HORA contiene la hora del día
+    const fechaRaw = col('FECHA', 'fecha', 'date')
+    const horaRaw  = col('HORA', 'hora', 'timestamp')
     let fecha = null
-    if (fechaRaw instanceof Date) fecha = fechaRaw
-    else if (typeof fechaRaw === 'string' && fechaRaw) {
+    if (fechaRaw instanceof Date) {
+      fecha = fechaRaw
+    } else if (typeof fechaRaw === 'string' && fechaRaw) {
       const parts = fechaRaw.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/)
       if (parts) fecha = new Date(`${parts[3].length===2?'20'+parts[3]:parts[3]}-${parts[2].padStart(2,'0')}-${parts[1].padStart(2,'0')}`)
       else fecha = new Date(fechaRaw)
     }
-    const { semana, periodoKey, periodoLabel } = fecha && !isNaN(fecha) ? getSemana(fecha) : { semana: null, periodoKey: null, periodoLabel: 'Sin período' }
+
+    // Hora del día: si HORA es un número (0-23) usarlo directamente, si no extraer de fecha
+    let horaNum = null
+    if (horaRaw !== '' && horaRaw !== undefined) {
+      const h = parseInt(horaRaw)
+      if (!isNaN(h) && h >= 0 && h <= 23) horaNum = h
+    }
+    if (horaNum === null && fecha && !isNaN(fecha)) horaNum = fecha.getHours()
+
+    const { semana, periodoKey, periodoLabel } = fecha && !isNaN(fecha)
+      ? getSemana(fecha)
+      : { semana: null, periodoKey: null, periodoLabel: 'Sin período' }
+
     return {
-      consulta:     get('consulta', 'pregunta', 'query', 'mensaje', 'texto') || '',
-      respuestaIA:  get('respuesta', 'answer', 'reply') || '',
-      nombreCurso:  get('curso', 'course', 'asignatura', 'nombre') || 'Sin curso',
-      codigoCurso:  get('codigo', 'code', 'cod') || '',
-      nrc:          String(get('nrc', 'section', 'seccion') || ''),
-      bloque:       get('bloque', 'block') || '',
-      periodo:      get('periodo', 'period', 'ciclo') || '',
-      campus:       get('campus', 'sede') || '',
-      usuario:      get('usuario', 'user', 'alumno', 'estudiante', 'email') || '',
-      fechaRaw:     fechaRaw,
+      userId:       col('User ID', 'user id', 'userid') || '',
+      usuario:      col('USUARIO', 'usuario', 'user', 'alumno', 'estudiante', 'email') || '',
+      consulta:     col('CONSULTA', 'consulta', 'pregunta', 'query', 'mensaje', 'texto') || '',
+      respuestaIA:  col('RESPUESTA DE LA IA', 'respuesta', 'answer', 'reply') || '',
+      urlCurso:     col('URL DEL CURSO', 'url') || '',
+      nombreCurso:  col('NOMBRE DEL CURSO', 'nombre del curso', 'curso', 'course', 'asignatura') || 'Sin curso',
+      codigoCurso:  col('CODIGO DEL CURSO', 'codigo del curso', 'codigo', 'code', 'cod') || '',
+      nrc:          String(col('NRC', 'nrc', 'section', 'seccion') || ''),
+      bloque:       col('BLOQUE', 'bloque', 'block') || '',
+      periodo:      col('PERIODO', 'periodo', 'period', 'ciclo') || '',
+      campus:       col('CAMPUS', 'campus', 'sede') || '',
+      fechaRaw,
       fecha:        fecha && !isNaN(fecha) ? fecha : null,
       fechaStr:     fecha && !isNaN(fecha) ? fecha.toISOString().slice(0,10) : '',
-      hora:         fecha && !isNaN(fecha) ? fecha.getHours() : null,
+      hora:         horaNum,
       semana,
       periodoKey,
       periodoLabel,
@@ -613,13 +636,41 @@ function TabTematicas({ data, setData }) {
   )
 }
 
+// ─── URL fija del Google Sheet de UC ─────────────────────────────────────────
+// URL publicada del Google Sheet de UC (formato CSV)
+const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSv6HB5-J_8Gqh9RctyZRLPlq8Wi8UVUl59HxdW2WiOHGV15WNr6ddLmcf0VOoLxWhhkd4Ncp6il1_g/pub?output=csv'
+
+async function cargarDesdeSheet() {
+  const res = await fetch(SHEET_CSV_URL)
+  if (!res.ok) throw new Error(`Error ${res.status} al acceder al Google Sheet. Verifica que esté publicado como CSV.`)
+  const text = await res.text()
+  return new Promise((resolve, reject) => {
+    Papa.parse(text, {
+      header: true, skipEmptyLines: true,
+      complete: r => resolve(normalizeRows(r.data)),
+      error: e => reject(e)
+    })
+  })
+}
+
 // ─── Pantalla de carga ────────────────────────────────────────────────────────
 function PantallaCarga({ onLoad }) {
+  const [estado, setEstado] = useState('cargando') // cargando | error | manual
+  const [errorMsg, setErrorMsg] = useState('')
   const [dragging, setDragging] = useState(false)
   const [sheetsUrl, setSheetsUrl] = useState('')
-  const [loadingSheets, setLoadingSheets] = useState(false)
-  const [errorSheets, setErrorSheets] = useState('')
+  const [loadingManual, setLoadingManual] = useState(false)
   const fileRef = useRef()
+
+  // Carga automática al montar
+  useEffect(() => {
+    cargarDesdeSheet()
+      .then(rows => onLoad(rows, { name: 'Google Sheets — UC', source: 'sheets' }))
+      .catch(e => {
+        setErrorMsg(e.message)
+        setEstado('error')
+      })
+  }, [])
 
   const handleFile = file => {
     parseFile(file, rows => onLoad(rows, { name: file.name, source: 'file' }))
@@ -631,40 +682,71 @@ function PantallaCarga({ onLoad }) {
     if (f) handleFile(f)
   }
 
-  const handleSheets = async () => {
+  const handleSheetsManual = async () => {
     if (!sheetsUrl.trim()) return
-    setLoadingSheets(true); setErrorSheets('')
+    setLoadingManual(true)
     try {
-      const csvUrl = sheetsUrl.includes('/export') ? sheetsUrl
-        : sheetsUrl.replace(/\/edit.*/, '/export?format=csv')
+      const csvUrl = sheetsUrl.replace(/\/edit.*/, '/export?format=csv')
       const res = await fetch(csvUrl)
-      if (!res.ok) throw new Error('No se pudo acceder al Google Sheet. Verifica que esté publicado.')
+      if (!res.ok) throw new Error('No se pudo acceder. Verifica que el Sheet esté publicado.')
       const text = await res.text()
       Papa.parse(text, {
         header: true, skipEmptyLines: true,
         complete: r => onLoad(normalizeRows(r.data), { name: 'Google Sheets', source: 'sheets' })
       })
     } catch (e) {
-      setErrorSheets(e.message)
+      setErrorMsg(e.message)
     } finally {
-      setLoadingSheets(false)
+      setLoadingManual(false)
     }
   }
 
+  // Estado: cargando automáticamente
+  if (estado === 'cargando') {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.accent, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 16 }}>
+            Universidad Continental
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: C.text, marginBottom: 8 }}>Dashboard Tutor IA</div>
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 28 }}>Cargando datos desde Google Sheets…</div>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 6 }}>
+            {[0,1,2].map(i => (
+              <div key={i} style={{
+                width: 8, height: 8, borderRadius: '50%', background: C.accent,
+                animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
+                opacity: 0.7
+              }} />
+            ))}
+          </div>
+          <style>{`@keyframes pulse { 0%,80%,100%{transform:scale(0.6);opacity:0.4} 40%{transform:scale(1);opacity:1} }`}</style>
+        </div>
+      </div>
+    )
+  }
+
+  // Estado: error — mostrar opciones manuales
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: C.bg }}>
       <div style={{ width: '100%', maxWidth: 560 }}>
-        <div style={{ textAlign: 'center', marginBottom: 36 }}>
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: C.accent, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 8 }}>
             Universidad Continental
           </div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: C.text, lineHeight: 1.2, marginBottom: 10 }}>
-            Dashboard Tutor IA
-          </h1>
-          <p style={{ fontSize: 14, color: C.muted }}>Análisis de consultas · Clasificación automática con IA</p>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: C.text, marginBottom: 8 }}>Dashboard Tutor IA</h1>
         </div>
 
-        {/* Drop zone */}
+        {errorMsg && (
+          <div style={{ background: C.red + '15', border: `1px solid ${C.red}44`, borderRadius: 10, padding: '12px 16px', fontSize: 12, color: C.red, marginBottom: 20 }}>
+            ⚠ No se pudo cargar automáticamente: {errorMsg}
+            <div style={{ marginTop: 6, color: C.muted }}>
+              Asegúrate de que el Sheet esté publicado: <strong style={{ color: C.text }}>Archivo → Compartir → Publicar en la web → CSV</strong>
+            </div>
+          </div>
+        )}
+
+        {/* Drop zone manual */}
         <div
           onDragOver={e => { e.preventDefault(); setDragging(true) }}
           onDragLeave={() => setDragging(false)}
@@ -672,35 +754,26 @@ function PantallaCarga({ onLoad }) {
           onClick={() => fileRef.current.click()}
           style={{
             border: `2px dashed ${dragging ? C.accent : C.border}`,
-            borderRadius: 14, padding: '36px 24px', textAlign: 'center',
-            cursor: 'pointer', marginBottom: 16,
-            background: dragging ? C.accent + '08' : C.card,
-            transition: 'all 0.2s'
+            borderRadius: 14, padding: '28px 24px', textAlign: 'center',
+            cursor: 'pointer', marginBottom: 14,
+            background: dragging ? C.accent + '08' : C.card, transition: 'all 0.2s'
           }}>
-          <div style={{ fontSize: 32, marginBottom: 10 }}>📂</div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 4 }}>Arrastra tu archivo aquí</div>
-          <div style={{ fontSize: 12, color: C.muted }}>o haz clic para seleccionar · Excel (.xlsx) o CSV</div>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>📂</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 4 }}>Cargar archivo Excel o CSV</div>
+          <div style={{ fontSize: 11, color: C.muted }}>Arrastra aquí o haz clic para seleccionar</div>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }} onChange={e => e.target.files[0] && handleFile(e.target.files[0])} />
         </div>
 
-        {/* Google Sheets */}
         <Card>
-          <SLabel>Cargar desde Google Sheets</SLabel>
+          <SLabel>O conectar a otro Google Sheet</SLabel>
           <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              value={sheetsUrl}
-              onChange={e => setSheetsUrl(e.target.value)}
-              placeholder="URL del Google Sheet (publicado como CSV)"
-              style={{ flex: 1, background: C.surface, border: `1px solid ${C.border}`, color: C.text, borderRadius: 8, padding: '8px 12px', fontSize: 12 }}
-            />
-            <button onClick={handleSheets} disabled={loadingSheets || !sheetsUrl.trim()}
-              style={{ background: C.accent, border: 'none', color: '#fff', borderRadius: 8, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-              {loadingSheets ? 'Cargando…' : 'Conectar'}
+            <input value={sheetsUrl} onChange={e => setSheetsUrl(e.target.value)}
+              placeholder="URL del Google Sheet"
+              style={{ flex: 1, background: C.surface, border: `1px solid ${C.border}`, color: C.text, borderRadius: 8, padding: '8px 12px', fontSize: 12 }} />
+            <button onClick={handleSheetsManual} disabled={loadingManual || !sheetsUrl.trim()}
+              style={{ background: C.accent, border: 'none', color: '#fff', borderRadius: 8, padding: '8px 16px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+              {loadingManual ? 'Cargando…' : 'Conectar'}
             </button>
-          </div>
-          {errorSheets && <div style={{ fontSize: 11, color: C.red, marginTop: 8 }}>{errorSheets}</div>}
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
-            El Sheet debe estar publicado: Archivo → Compartir → Publicar en la web → CSV
           </div>
         </Card>
       </div>
@@ -772,7 +845,7 @@ export default function App() {
           </select>
           <button onClick={() => { setData(null); setFileInfo(null) }}
             style={{ background: 'transparent', border: `1px solid ${C.border}`, color: C.muted, borderRadius: 6, padding: '5px 12px', fontSize: 12, cursor: 'pointer' }}>
-            ← Cambiar archivo
+            ↺ Recargar datos
           </button>
         </div>
       </div>
