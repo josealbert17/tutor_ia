@@ -162,7 +162,13 @@ const Badge = ({ children, color = C.accent }) => (
   </span>
 )
 
-const TT = () => <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, fontSize: 12 }} />
+const TT = () => (
+  <Tooltip
+    contentStyle={{ background: '#0d1b2a', border: '1px solid #2a4a6b', borderRadius: 8, fontSize: 12, color: '#e2e8f0' }}
+    labelStyle={{ color: '#e2e8f0', fontWeight: 600 }}
+    itemStyle={{ color: '#94c8f0' }}
+  />
+)
 
 function DataTable({ headers, rows, maxH = 360 }) {
   const th = { padding: '8px 12px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: C.muted, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' }
@@ -220,11 +226,11 @@ function TabResumen({ fd }) {
           <SLabel>Top 10 cursos por consultas</SLabel>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={porCurso} layout="vertical" margin={{ left: 10 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-              <XAxis type="number" tick={{ fill: C.muted, fontSize: 11 }} />
-              <YAxis type="category" dataKey="nombreCurso" tick={{ fill: C.muted, fontSize: 10 }} width={130} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#1e3a5f" />
+              <XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+              <YAxis type="category" dataKey="nombreCurso" tick={{ fill: '#cbd5e1', fontSize: 10 }} width={130} />
               <TT />
-              <Bar dataKey="total" fill={C.accent} radius={[0, 4, 4, 0]} />
+              <Bar dataKey="total" fill={C.accent} radius={[0, 4, 4, 0]} label={{ position: 'right', fill: '#cbd5e1', fontSize: 10 }} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -232,11 +238,13 @@ function TabResumen({ fd }) {
           <SLabel>Consultas por período académico</SLabel>
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
-              <Pie data={porPeriodo} dataKey="total" nameKey="periodoLabel" cx="50%" cy="50%" outerRadius={90} label={({ name, percent }) => `${(percent*100).toFixed(0)}%`}>
+              <Pie data={porPeriodo} dataKey="total" nameKey="periodoLabel" cx="50%" cy="50%" outerRadius={90}
+                label={({ name, percent }) => `${(percent*100).toFixed(0)}%`}
+                labelLine={{ stroke: '#94a3b8' }}>
                 {porPeriodo.map((_, i) => <Cell key={i} fill={PAL[i % PAL.length]} />)}
               </Pie>
               <TT />
-              <Legend wrapperStyle={{ fontSize: 11, color: C.muted }} />
+              <Legend wrapperStyle={{ fontSize: 11, color: '#cbd5e1' }} />
             </PieChart>
           </ResponsiveContainer>
         </Card>
@@ -321,11 +329,11 @@ function TabTemp({ fd }) {
           <>
             <ResponsiveContainer width="100%" height={240}>
               <LineChart data={semanalData} margin={{ right: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-                <XAxis dataKey="semana" tick={{ fill: C.muted, fontSize: 11 }} />
-                <YAxis tick={{ fill: C.muted, fontSize: 11 }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e3a5f" />
+                <XAxis dataKey="semana" tick={{ fill: '#cbd5e1', fontSize: 11 }} />
+                <YAxis tick={{ fill: '#cbd5e1', fontSize: 11 }} />
                 <TT />
-                <Legend wrapperStyle={{ fontSize: 11, color: C.muted, paddingTop: 8 }} />
+                <Legend wrapperStyle={{ fontSize: 11, color: '#cbd5e1', paddingTop: 8 }} />
                 {periodoKeys.map((p, i) => (
                   <Line key={p} type="monotone" dataKey={p} stroke={PAL[i % PAL.length]} strokeWidth={2} dot={{ r: 3 }} connectNulls />
                 ))}
@@ -350,9 +358,9 @@ function TabTemp({ fd }) {
           <SLabel>Consultas por día</SLabel>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={dias}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-              <XAxis dataKey="fecha" tick={{ fill: C.muted, fontSize: 10 }} interval="preserveStartEnd" />
-              <YAxis tick={{ fill: C.muted, fontSize: 11 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#1e3a5f" />
+              <XAxis dataKey="fecha" tick={{ fill: '#cbd5e1', fontSize: 10 }} interval="preserveStartEnd" />
+              <YAxis tick={{ fill: '#cbd5e1', fontSize: 11 }} />
               <TT />
               <Line type="monotone" dataKey="consultas" stroke={C.accent} strokeWidth={2} dot={false} />
             </LineChart>
@@ -362,9 +370,9 @@ function TabTemp({ fd }) {
           <SLabel>Consultas por hora del día</SLabel>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={horas}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-              <XAxis dataKey="hora" tick={{ fill: C.muted, fontSize: 10 }} />
-              <YAxis tick={{ fill: C.muted, fontSize: 11 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#1e3a5f" />
+              <XAxis dataKey="hora" tick={{ fill: '#cbd5e1', fontSize: 10 }} />
+              <YAxis tick={{ fill: '#cbd5e1', fontSize: 11 }} />
               <TT />
               <Bar dataKey="consultas" fill={C.purple} radius={[3, 3, 0, 0]} />
             </BarChart>
@@ -420,48 +428,75 @@ function TabTematicas({ data, setData }) {
 
     setEstado('procesando')
     setErrorMsg('')
-    const LOTE = 30
+    const LOTE = 20 // lotes más pequeños para evitar timeouts
     const total = objetivos.length
     setProgreso({ actual: 0, total })
 
-    // Mapa índice original → objeto
-    const indices = objetivos.map((r, i) => ({ r, i: data.indexOf(r) }))
+    const indices = objetivos.map((r) => ({ r, i: data.indexOf(r) }))
     const newData = [...data]
+    let procesados = 0
+    let erroresConsecutivos = 0
 
-    try {
-      for (let start = 0; start < indices.length; start += LOTE) {
-        const lote = indices.slice(start, start + LOTE)
-        const payload = lote.map(({ r }) => ({ texto: r.consulta.slice(0, 300) }))
+    for (let start = 0; start < indices.length; start += LOTE) {
+      const lote = indices.slice(start, start + LOTE)
+      const payload = lote.map(({ r }) => ({ texto: r.consulta.slice(0, 250) }))
 
-        const res = await fetch('/api/clasificar', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ consultas: payload })
-        })
+      let exitoso = false
+      for (let intento = 0; intento < 3; intento++) {
+        try {
+          const res = await fetch('/api/clasificar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ consultas: payload })
+          })
 
-        if (!res.ok) {
-          const err = await res.json()
-          throw new Error(err.error || `Error ${res.status}`)
-        }
-
-        const { clasificaciones } = await res.json()
-
-        lote.forEach(({ i }, j) => {
-          const cl = clasificaciones[j]
-          if (cl) {
-            newData[i] = { ...newData[i], tematica: cl.tematica || '', subtema: cl.subtema || '', tipo: cl.tipo || '', profundidad: cl.profundidad || '' }
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+            // Rate limit: esperar más
+            if (res.status === 429) {
+              await new Promise(r => setTimeout(r, 3000 * (intento + 1)))
+              continue
+            }
+            throw new Error(err.error || `Error ${res.status}`)
           }
-        })
 
-        setProgreso({ actual: Math.min(start + LOTE, total), total })
-        setData([...newData])
-        await new Promise(r => setTimeout(r, 300)) // pequeña pausa entre lotes
+          const { clasificaciones } = await res.json()
+          lote.forEach(({ i }, j) => {
+            const cl = clasificaciones?.[j]
+            if (cl) {
+              newData[i] = { ...newData[i], tematica: cl.tematica || 'Sin clasificar', subtema: cl.subtema || '', tipo: cl.tipo || '', profundidad: cl.profundidad || '' }
+            }
+          })
+          procesados += lote.length
+          exitoso = true
+          erroresConsecutivos = 0
+          break
+        } catch (err) {
+          if (intento === 2) {
+            // Marcar este lote como "Sin clasificar" y continuar
+            lote.forEach(({ i }) => {
+              newData[i] = { ...newData[i], tematica: 'Sin clasificar', subtema: '', tipo: '', profundidad: '' }
+            })
+            procesados += lote.length
+            erroresConsecutivos++
+            if (erroresConsecutivos >= 5) {
+              setErrorMsg(`Se detuvieron 5 lotes consecutivos con error: ${err.message}`)
+              setEstado('error')
+              setData([...newData])
+              return
+            }
+          } else {
+            await new Promise(r => setTimeout(r, 1500 * (intento + 1)))
+          }
+        }
       }
-      setEstado('listo')
-    } catch (err) {
-      setErrorMsg(err.message)
-      setEstado('error')
+
+      setProgreso({ actual: procesados, total })
+      setData([...newData])
+      // Pausa entre lotes para no saturar la API
+      await new Promise(r => setTimeout(r, 500))
     }
+    setEstado('listo')
   }
 
   const exportarExcel = () => {
@@ -538,11 +573,22 @@ function TabTematicas({ data, setData }) {
 
         {estado === 'procesando' && (
           <div style={{ marginTop: 14 }}>
-            <div style={{ background: C.border, borderRadius: 4, height: 6, overflow: 'hidden' }}>
-              <div style={{ background: C.accent, height: '100%', width: `${progreso.total > 0 ? (progreso.actual / progreso.total) * 100 : 0}%`, transition: 'width 0.4s ease', borderRadius: 4 }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: 12, color: '#cbd5e1' }}>Procesando en lotes de 20</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: C.accent, fontFamily: 'JetBrains Mono, monospace' }}>
+                {progreso.actual} / {progreso.total} ({progreso.total > 0 ? Math.round((progreso.actual/progreso.total)*100) : 0}%)
+              </span>
             </div>
-            <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>
-              Procesando en lotes de 30 · {progreso.actual} de {progreso.total} consultas
+            <div style={{ background: '#1a2e45', borderRadius: 4, height: 8, overflow: 'hidden' }}>
+              <div style={{
+                background: `linear-gradient(90deg, ${C.accent}, ${C.green})`,
+                height: '100%',
+                width: `${progreso.total > 0 ? (progreso.actual / progreso.total) * 100 : 0}%`,
+                transition: 'width 0.4s ease', borderRadius: 4
+              }} />
+            </div>
+            <div style={{ fontSize: 11, color: '#64748b', marginTop: 6 }}>
+              ⏳ Tiempo estimado: ~{Math.ceil((progreso.total - progreso.actual) / 20 * 0.5)} min restantes
             </div>
           </div>
         )}
@@ -662,14 +708,25 @@ function PantallaCarga({ onLoad }) {
   const [loadingManual, setLoadingManual] = useState(false)
   const fileRef = useRef()
 
-  // Carga automática al montar
+  // Carga automática al montar — con timeout de 15s
   useEffect(() => {
+    const timeout = setTimeout(() => {
+      setErrorMsg('La carga tardó demasiado. Verifica tu conexión o carga el archivo manualmente.')
+      setEstado('error')
+    }, 15000)
+
     cargarDesdeSheet()
-      .then(rows => onLoad(rows, { name: 'Google Sheets — UC', source: 'sheets' }))
+      .then(rows => {
+        clearTimeout(timeout)
+        onLoad(rows, { name: 'Google Sheets — UC', source: 'sheets' })
+      })
       .catch(e => {
+        clearTimeout(timeout)
         setErrorMsg(e.message)
         setEstado('error')
       })
+
+    return () => clearTimeout(timeout)
   }, [])
 
   const handleFile = file => {
