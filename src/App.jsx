@@ -36,10 +36,76 @@ const HEAT_PAL = ['#0a1426', '#1e3a5f', '#1e4a8a', '#2563eb', '#3b82f6', '#60a5f
 // ═══════════════════════════════════════════════════════════════════════════
 // CALENDARIO ACADÉMICO - se calcula dinámicamente desde los datos
 // ═══════════════════════════════════════════════════════════════════════════
-function getSemanaNum(fecha, inicio) {
-  if (!fecha || !inicio) return null
-  const diff = Math.floor((fecha - inicio) / (7 * 86400000))
+// CALENDARIO ACADEMICO UC - Fallback hardcodeado (se sobreescribe con datos del Sheet)
+const CALENDARIO_UC_DEFAULT = {
+  '202520 VV1': { label: '202520 Bloque A', inicio: new Date('2025-08-18'), fin: new Date('2025-10-12') },
+  '202520 VV2': { label: '202520 Bloque B', inicio: new Date('2025-10-13'), fin: new Date('2025-12-07') },
+  '202600 VV1': { label: '202600 Bloque A', inicio: new Date('2026-01-02'), fin: new Date('2026-02-26') },
+  '202610 VV1': { label: '202610 Bloque A', inicio: new Date('2026-03-16'), fin: new Date('2026-05-10') },
+  '202610 VV2': { label: '202610 Bloque B', inicio: new Date('2026-05-18'), fin: new Date('2026-07-12') },
+}
+
+// URL de la hoja CALENDARIO_ACADEMICO publicada como CSV
+const CALENDARIO_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSv6HB5-J_8Gqh9RctyZRLPlq8Wi8UVUl59HxdW2WiOHGV15WNr6ddLmcf0VOoLxWhhkd4Ncp6il1_g/pub?gid=2094941470&single=true&output=csv'
+
+// Parsea fecha DD/MM/YYYY o YYYY-MM-DD
+function parseFechaUC(s) {
+  if (!s) return null
+  s = String(s).trim()
+  // DD/MM/YYYY
+  const m1 = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/)
+  if (m1) return new Date(`${m1[3]}-${m1[2].padStart(2,'0')}-${m1[1].padStart(2,'0')}`)
+  // YYYY-MM-DD
+  const m2 = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (m2) return new Date(s)
+  return null
+}
+
+async function cargarCalendarioDesdeSheet() {
+  try {
+    const res = await fetch(CALENDARIO_CSV_URL)
+    if (!res.ok) return CALENDARIO_UC_DEFAULT
+    const text = await res.text()
+    const lines = text.trim().split('\n').map(l => l.split(',').map(c => c.replace(/^"|"$/g, '').trim()))
+    if (lines.length < 2) return CALENDARIO_UC_DEFAULT
+    // Detectar columnas
+    const headers = lines[0].map(h => h.toUpperCase())
+    const iPerBloque = headers.findIndex(h => h.includes('PERIODO'))
+    const iCodigo    = headers.findIndex(h => h.includes('CODIGO') || h.includes('CÓDIGO'))
+    const iInicio    = headers.findIndex(h => h.includes('INICIO'))
+    const iFin       = headers.findIndex(h => h.includes('FIN'))
+    if (iPerBloque < 0 || iInicio < 0 || iFin < 0) return CALENDARIO_UC_DEFAULT
+    const cal = {}
+    lines.slice(1).forEach(cols => {
+      const periodoBloque = cols[iPerBloque]
+      const codigo        = iCodigo >= 0 ? cols[iCodigo] : ''
+      const inicio        = parseFechaUC(cols[iInicio])
+      const fin           = parseFechaUC(cols[iFin])
+      if (!periodoBloque || !inicio || !fin) return
+      // Construir clave: "202520 VV1" desde "202520-A" + "VV1"
+      const clave = periodoBloque.replace('-A',''  ).replace('-B','') + ' ' + codigo
+      cal[clave] = { label: periodoBloque, inicio, fin }
+    })
+    return Object.keys(cal).length > 0 ? cal : CALENDARIO_UC_DEFAULT
+  } catch {
+    return CALENDARIO_UC_DEFAULT
+  }
+}
+
+function getSemanaNum(fecha, periodoBloque, calendarioUC) {
+  if (!fecha || !periodoBloque) return null
+  const cal = (calendarioUC || CALENDARIO_UC_DEFAULT)[periodoBloque]
+  if (!cal) return null
+  if (fecha < cal.inicio || fecha > cal.fin) return null
+  const diff = Math.floor((fecha - cal.inicio) / (7 * 86400000))
   return diff + 1
+}
+
+function esFueraDeRango(fecha, periodoBloque, calendarioUC) {
+  if (!fecha || !periodoBloque) return true
+  const cal = (calendarioUC || CALENDARIO_UC_DEFAULT)[periodoBloque]
+  if (!cal) return true
+  return fecha < cal.inicio || fecha > cal.fin
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -145,14 +211,15 @@ function normalizeRows(raw) {
 }
 
 // Calcula calendario académico dinámicamente: inicio = fecha min de cada periodo-bloque
-function calcularCalendario(data) {
+function calcularCalendario(data, calendarioUC) {
+  const base = calendarioUC || CALENDARIO_UC_DEFAULT
   const cal = {}
+  Object.entries(base).forEach(([key, v]) => {
+    cal[key] = { inicio: v.inicio, fin: v.fin, label: v.label, count: 0 }
+  })
   data.forEach(r => {
-    if (!r.fecha || !r.periodoBloque || r.periodoBloque === 'Sin período') return
-    if (!cal[r.periodoBloque]) cal[r.periodoBloque] = { inicio: r.fecha, fin: r.fecha, count: 0 }
-    if (r.fecha < cal[r.periodoBloque].inicio) cal[r.periodoBloque].inicio = r.fecha
-    if (r.fecha > cal[r.periodoBloque].fin)    cal[r.periodoBloque].fin = r.fecha
-    cal[r.periodoBloque].count++
+    if (!r.periodoBloque || r.periodoBloque === 'Sin periodo') return
+    if (cal[r.periodoBloque]) cal[r.periodoBloque].count++
   })
   return cal
 }
@@ -517,8 +584,9 @@ function TabTemporalidad({ fd, calendario }) {
   const { semanalData, periodoKeys } = useMemo(() => {
     // Calcular semana relativa al inicio de cada periodo-bloque
     const conSemana = validas.map(r => {
-      if (!r.fecha || !r.periodoBloque || !calendario[r.periodoBloque]) return null
-      const sem = getSemanaNum(r.fecha, calendario[r.periodoBloque].inicio)
+      if (!r.fecha || !r.periodoBloque) return null
+      const sem = getSemanaNum(r.fecha, r.periodoBloque, calendario)
+      if (!sem) return null
       return { ...r, semana: sem }
     }).filter(Boolean)
 
@@ -753,14 +821,18 @@ function TabUsuarios({ fd }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB: CALIDAD
 // ═══════════════════════════════════════════════════════════════════════════
-function TabCalidad({ fd, totalCargados }) {
+function TabCalidad({ fd, totalCargados, calendarioUC }) {
   const sinResp = useMemo(() => fd.filter(r => !r.esInvalido && r.sinRespuesta), [fd])
   const malFormados = useMemo(() => fd.filter(r => r.esInvalido), [fd])
   const validas = useMemo(() => fd.filter(r => !r.esInvalido), [fd])
+  const fueraRango = useMemo(() => validas.filter(r =>
+    r.fecha && r.periodoBloque ? esFueraDeRango(r.fecha, r.periodoBloque, calendarioUC) : false
+  ), [validas, calendarioUC])
 
   const usuariosUnicos = new Set(validas.map(r => r.userId).filter(Boolean)).size
   const nrcsUnicos = new Set(validas.map(r => r.nrc).filter(Boolean)).size
   const pctSinResp = validas.length > 0 ? (sinResp.length / validas.length * 100).toFixed(1) : 0
+  const pctFueraRango = validas.length > 0 ? (fueraRango.length / validas.length * 100).toFixed(1) : 0
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -804,6 +876,32 @@ function TabCalidad({ fd, totalCargados }) {
         </Card>
       </div>
 
+      {fueraRango.length > 0 && (
+        <Card>
+          <SLabel>Consultas fuera de rango académico</SLabel>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>
+            Estas consultas tienen fecha fuera del periodo académico registrado en el calendario.
+            Pueden ser registros de prueba, errores de fecha o consultas en periodos no configurados.
+          </div>
+          <DataTable
+            headers={['Usuario', 'Curso', 'Fecha', 'Periodo-Bloque', 'Consulta']}
+            rows={fueraRango.slice(0, 100).map(r => [
+              r.usuario || '—',
+              r.nombreCurso,
+              r.fechaStr,
+              r.periodoBloque,
+              (r.consulta || '').slice(0, 70) + (r.consulta.length > 70 ? '…' : '')
+            ])}
+            maxH={300}
+          />
+          {fueraRango.length > 100 && (
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
+              Mostrando 100 de {fmtNum(fueraRango.length)} registros fuera de rango.
+            </div>
+          )}
+        </Card>
+      )}
+
       <Card>
         <SLabel>Resumen de calidad del dataset</SLabel>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
@@ -811,6 +909,8 @@ function TabCalidad({ fd, totalCargados }) {
           <KPI label="Filtrados visibles" value={validas.length} color={C.green} />
           <KPI label="Sin respuesta" value={sinResp.length} color={C.red} />
           <KPI label="Mal formados" value={malFormados.length} color={C.amber} />
+          <KPI label="Fuera de rango académico" value={fueraRango.length}
+            sub={`${pctFueraRango}% del total`} subColor={C.amber} color={C.amber} />
           <KPI label="Usuarios únicos" value={usuariosUnicos} color={C.purple} />
           <KPI label="NRCs únicos" value={nrcsUnicos} color={C.cyan} />
         </div>
@@ -1221,6 +1321,16 @@ export default function App() {
   const [data, setData] = useState(null)
   const [fileInfo, setFileInfo] = useState(null)
   const [tab, setTab] = useState('resumen')
+  const [calendarioUC, setCalendarioUC] = useState(CALENDARIO_UC_DEFAULT)
+  const [calendarioCargado, setCalendarioCargado] = useState(false)
+
+  // Cargar calendario desde Google Sheets al montar
+  useEffect(() => {
+    cargarCalendarioDesdeSheet().then(cal => {
+      setCalendarioUC(cal)
+      setCalendarioCargado(true)
+    })
+  }, [])
 
   // Filtros globales
   const [fPeriodo, setFPeriodo] = useState('todos')
@@ -1234,8 +1344,8 @@ export default function App() {
     setFileInfo({ ...info, total: rows.length, loaded: new Date() })
   }, [])
 
-  // Calendario académico calculado de los datos
-  const calendario = useMemo(() => data ? calcularCalendario(data) : {}, [data])
+  // Calendario académico con fechas reales de UC
+  const calendario = useMemo(() => data ? calcularCalendario(data, calendarioUC) : {}, [data, calendarioUC])
 
   // Opciones de filtros
   const periodos = useMemo(() => data ? [...new Set(data.map(r => r.periodo).filter(Boolean))].sort() : [], [data])
@@ -1253,8 +1363,8 @@ export default function App() {
     if (fSemana !== 'todas') {
       const semNum = parseInt(fSemana)
       r = r.filter(x => {
-        if (!x.fecha || !x.periodoBloque || !calendario[x.periodoBloque]) return false
-        return getSemanaNum(x.fecha, calendario[x.periodoBloque].inicio) === semNum
+        if (!x.fecha || !x.periodoBloque) return false
+        return getSemanaNum(x.fecha, x.periodoBloque, calendarioUC) === semNum
       })
     }
     return r
@@ -1287,6 +1397,7 @@ export default function App() {
             <div style={{ fontSize: 18, fontWeight: 700, color: C.text }}>Análisis de consultas del Tutor IA</div>
             <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
               {fileInfo?.source === 'sheets' ? '🟢' : '📁'} {fileInfo?.name} · {fmtNum(totalCargados)} registros · {new Date().toLocaleTimeString('es-PE')}
+          {calendarioCargado && <span style={{ marginLeft: 12, color: C.green }}>📅 Calendario UC cargado ({Object.keys(calendarioUC).length} bloques)</span>}
             </div>
           </div>
           <button onClick={() => { setData(null); setFileInfo(null) }}
@@ -1346,7 +1457,7 @@ export default function App() {
         {tab === 'temporalidad'  && <TabTemporalidad fd={fd} calendario={calendario} />}
         {tab === 'tematicas'     && <TabTematicas data={data} setData={setData} />}
         {tab === 'usuarios'      && <TabUsuarios fd={fd} />}
-        {tab === 'calidad'       && <TabCalidad fd={fd} totalCargados={totalCargados} />}
+        {tab === 'calidad'       && <TabCalidad fd={fd} totalCargados={totalCargados} calendarioUC={calendarioUC} />}
       </div>
     </div>
   )
