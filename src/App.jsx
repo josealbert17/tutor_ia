@@ -151,22 +151,33 @@ function normalizeRows(raw) {
     const fechaRaw = col('FECHA', 'fecha', 'date')
     const horaRaw  = col('HORA', 'hora')
     let fecha = null
-    if (fechaRaw instanceof Date) fecha = fechaRaw
-    else if (typeof fechaRaw === 'string' && fechaRaw) {
-      const parts = fechaRaw.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/)
-      if (parts) fecha = new Date(`${parts[3].length===2?'20'+parts[3]:parts[3]}-${parts[2].padStart(2,'0')}-${parts[1].padStart(2,'0')}`)
-      else fecha = new Date(fechaRaw)
-    }
 
-    let horaNum = null
-    if (horaRaw !== '' && horaRaw !== undefined) {
-      if (typeof horaRaw === 'string' && horaRaw.includes(':')) {
-        horaNum = parseInt(horaRaw.split(':')[0])
+    if (fechaRaw instanceof Date) {
+      fecha = fechaRaw
+    } else if (typeof fechaRaw === 'string' && fechaRaw.trim()) {
+      const f = fechaRaw.trim()
+      // Formato: "2026-06-14 00:00:00" o "2026-06-14T00:00:00"
+      const mISO = f.match(/^(\d{4})-(\d{2})-(\d{2})/)
+      if (mISO) {
+        fecha = new Date(`${mISO[1]}-${mISO[2]}-${mISO[3]}T00:00:00`)
       } else {
-        const h = parseInt(horaRaw)
-        if (!isNaN(h) && h >= 0 && h <= 23) horaNum = h
+        // Formato: "14/06/2026" o "14-06-2026"
+        const mDMY = f.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/)
+        if (mDMY) {
+          fecha = new Date(`${mDMY[3]}-${mDMY[2].padStart(2,'0')}-${mDMY[1].padStart(2,'0')}T00:00:00`)
+        }
       }
     }
+
+    // Hora: viene en columna HORA separada como "21:19:00"
+    let horaNum = null
+    if (horaRaw && String(horaRaw).includes(':')) {
+      horaNum = parseInt(String(horaRaw).split(':')[0])
+    } else if (horaRaw !== '' && horaRaw !== undefined) {
+      const h = parseInt(horaRaw)
+      if (!isNaN(h) && h >= 0 && h <= 23) horaNum = h
+    }
+    // Si no hay hora separada, extraer de la fecha (pero en UC siempre viene en HORA)
     if (horaNum === null && fecha && !isNaN(fecha)) horaNum = fecha.getHours()
 
     const consulta = String(col('CONSULTA', 'consulta', 'pregunta', 'query', 'mensaje') || '').trim()
