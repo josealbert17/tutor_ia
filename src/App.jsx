@@ -559,6 +559,12 @@ function TabNRC({ fd }) {
 
       <Card>
         <SLabel>Índice de dependencia por NRC</SLabel>
+        {/* Leyenda explicativa */}
+        <div style={{ background: C.surface, borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 12, color: C.muted, display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+          <span>📌 <strong style={{color:C.textDim}}>Cons./usr:</strong> promedio de consultas por estudiante en ese NRC</span>
+          <span>📌 <strong style={{color:C.textDim}}>Dependencia:</strong> nivel de uso del Tutor IA. <strong style={{color:C.red}}>Alta</strong> ≥7 cons/usr · <strong style={{color:C.amber}}>Med</strong> 5-7 · <strong style={{color:C.green}}>Baja</strong> &lt;5</span>
+          <span>📌 <strong style={{color:C.textDim}}>% Sin resp.:</strong> porcentaje de consultas que no recibieron respuesta del tutor</span>
+        </div>
         <DataTable
           headers={['Curso', 'Código', 'NRC', 'Bloque', 'Periodo', 'Consultas', 'Usuarios', 'Cons./usr', 'Sin resp.', 'Dependencia']}
           rows={indiceNRC.map(r => {
@@ -663,8 +669,8 @@ function TabTemporalidad({ fd, calendario }) {
                 ))}
               </LineChart>
             </ResponsiveContainer>
-            <div style={{ fontSize: 11, color: C.muted, marginTop: 8, fontStyle: 'italic' }}>
-              Sem 1 = primera semana de actividad de cada periodo-bloque (calculado automáticamente).
+            <div style={{ background: C.surface, borderRadius: 8, padding: '10px 14px', marginTop: 12, fontSize: 12, color: C.muted }}>
+              📅 <strong style={{color:C.textDim}}>Cómo se calculan las semanas:</strong> Sem 1 corresponde a la primera semana oficial de clases según el calendario académico de UC cargado desde Google Sheets. Las consultas fuera del rango oficial no se asignan a ninguna semana y no aparecen en este gráfico.
             </div>
           </>
         ) : <div style={{ color: C.muted, padding: 30, textAlign: 'center' }}>Sin datos temporales suficientes</div>}
@@ -833,6 +839,7 @@ function TabUsuarios({ fd }) {
 // TAB: CALIDAD
 // ═══════════════════════════════════════════════════════════════════════════
 function TabCalidad({ fd, totalCargados, calendarioUC }) {
+  const [mostrarFueraRango, setMostrarFueraRango] = useState(false)
   const sinResp = useMemo(() => fd.filter(r => !r.esInvalido && r.sinRespuesta), [fd])
   const malFormados = useMemo(() => fd.filter(r => r.esInvalido), [fd])
   const validas = useMemo(() => fd.filter(r => !r.esInvalido), [fd])
@@ -889,26 +896,38 @@ function TabCalidad({ fd, totalCargados, calendarioUC }) {
 
       {fueraRango.length > 0 && (
         <Card>
-          <SLabel>Consultas fuera de rango académico</SLabel>
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>
-            Estas consultas tienen fecha fuera del periodo académico registrado en el calendario.
-            Pueden ser registros de prueba, errores de fecha o consultas en periodos no configurados.
-          </div>
-          <DataTable
-            headers={['Usuario', 'Curso', 'Fecha', 'Periodo-Bloque', 'Consulta']}
-            rows={fueraRango.slice(0, 100).map(r => [
-              r.usuario || '—',
-              r.nombreCurso,
-              r.fechaStr,
-              r.periodoBloque,
-              (r.consulta || '').slice(0, 70) + (r.consulta.length > 70 ? '…' : '')
-            ])}
-            maxH={300}
-          />
-          {fueraRango.length > 100 && (
-            <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
-              Mostrando 100 de {fmtNum(fueraRango.length)} registros fuera de rango.
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div>
+              <SLabel style={{ margin: 0 }}>Consultas fuera de rango académico</SLabel>
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>
+                Consultas con fecha fuera de los bloques registrados en el calendario UC. Pueden ser registros de prueba, errores de fecha o consultas en periodos no configurados aún.
+              </div>
             </div>
+            <button
+              onClick={() => setMostrarFueraRango(!mostrarFueraRango)}
+              style={{ background: mostrarFueraRango ? C.amber+'22' : C.surface, border: `1px solid ${mostrarFueraRango ? C.amber : C.border}`, color: mostrarFueraRango ? C.amber : C.textDim, borderRadius: 8, padding: '7px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              {mostrarFueraRango ? '▲ Ocultar detalle' : `▼ Ver ${fmtNum(fueraRango.length)} registros`}
+            </button>
+          </div>
+          {mostrarFueraRango && (
+            <>
+              <DataTable
+                headers={['Usuario', 'Curso', 'Fecha', 'Periodo-Bloque', 'Consulta']}
+                rows={fueraRango.slice(0, 200).map(r => [
+                  r.usuario || '—',
+                  r.nombreCurso,
+                  r.fechaStr,
+                  r.periodoBloque,
+                  (r.consulta || '').slice(0, 80) + (r.consulta.length > 80 ? '…' : '')
+                ])}
+                maxH={360}
+              />
+              {fueraRango.length > 200 && (
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
+                  Mostrando 200 de {fmtNum(fueraRango.length)} registros. Exporta a Excel para ver todos.
+                </div>
+              )}
+            </>
           )}
         </Card>
       )}
@@ -1237,6 +1256,188 @@ function TabTematicas({ data, setData }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// TAB: COMPARATIVA — comparación entre periodos y bloques
+// ═══════════════════════════════════════════════════════════════════════════
+function TabComparativa({ data, calendarioUC }) {
+  const [ejeX, setEjeX] = useState('periodoBloque') // periodoBloque | semana
+  const [metrica, setMetrica] = useState('consultas') // consultas | usuarios | sinResp | tematica
+
+  const validas = useMemo(() => (data || []).filter(r => !r.esInvalido), [data])
+
+  // Datos por periodo-bloque
+  const porPeriodo = useMemo(() => {
+    const m = {}
+    validas.forEach(r => {
+      const k = r.periodoBloque || 'Sin período'
+      if (!m[k]) m[k] = { label: k, consultas: 0, usuarios: new Set(), sinResp: 0, tematicas: {}, cursos: new Set() }
+      m[k].consultas++
+      if (r.userId) m[k].usuarios.add(r.userId)
+      if (r.sinRespuesta) m[k].sinResp++
+      if (r.tematica) m[k].tematicas[r.tematica] = (m[k].tematicas[r.tematica] || 0) + 1
+      if (r.nombreCurso) m[k].cursos.add(r.nombreCurso)
+    })
+    return Object.values(m).map(r => ({
+      ...r,
+      usuarios: r.usuarios.size,
+      cursos: r.cursos.size,
+      pctSinResp: r.consultas > 0 ? +((r.sinResp / r.consultas) * 100).toFixed(1) : 0,
+      promConsUser: r.usuarios.size > 0 ? +(r.consultas / r.usuarios.size).toFixed(1) : 0,
+      tematicaTop: Object.entries(r.tematicas).sort((a,b)=>b[1]-a[1])[0]?.[0] || '—'
+    })).sort((a,b) => a.label.localeCompare(b.label))
+  }, [validas])
+
+  // Datos semana a semana por periodo (para gráfico)
+  const semanalComp = useMemo(() => {
+    const periodos = [...new Set(validas.map(r => r.periodoBloque).filter(Boolean))].sort()
+    const weeks = {}
+    validas.forEach(r => {
+      if (!r.fecha || !r.periodoBloque) return
+      const sem = getSemanaNum(r.fecha, r.periodoBloque, calendarioUC)
+      if (!sem || sem < 1 || sem > 10) return
+      const key = `Sem ${sem}`
+      if (!weeks[key]) weeks[key] = { semana: key, _num: sem }
+      weeks[key][r.periodoBloque] = (weeks[key][r.periodoBloque] || 0) + 1
+    })
+    return { data: Object.values(weeks).sort((a,b) => a._num - b._num), periodos }
+  }, [validas, calendarioUC])
+
+  // Temáticas por periodo
+  const tematicasComp = useMemo(() => {
+    const tematicas = [...new Set(validas.map(r => r.tematica).filter(Boolean))].sort()
+    const periodos = [...new Set(validas.map(r => r.periodoBloque).filter(Boolean))].sort()
+    const m = {}
+    validas.forEach(r => {
+      if (!r.tematica || !r.periodoBloque) return
+      if (!m[r.tematica]) m[r.tematica] = { tematica: r.tematica }
+      m[r.tematica][r.periodoBloque] = (m[r.tematica][r.periodoBloque] || 0) + 1
+    })
+    return { data: Object.values(m).sort((a,b) => {
+      const totalA = periodos.reduce((s,p) => s + (a[p]||0), 0)
+      const totalB = periodos.reduce((s,p) => s + (b[p]||0), 0)
+      return totalB - totalA
+    }), periodos }
+  }, [validas])
+
+  const metricas = [
+    { id: 'consultas', label: 'Consultas totales' },
+    { id: 'usuarios', label: 'Usuarios únicos' },
+    { id: 'pctSinResp', label: '% Sin respuesta' },
+    { id: 'promConsUser', label: 'Promedio cons./usuario' },
+    { id: 'cursos', label: 'Cursos activos' },
+  ]
+
+  const btnStyle = (active) => ({
+    padding: '6px 14px', fontSize: 12, fontWeight: active ? 700 : 500,
+    background: active ? C.accent+'22' : 'transparent',
+    border: `1px solid ${active ? C.accent : C.border}`,
+    color: active ? C.accent2 : C.muted,
+    borderRadius: 6, cursor: 'pointer'
+  })
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+      {/* Tabla resumen comparativo */}
+      <Card>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <SLabel style={{ margin: 0 }}>Comparativa por periodo-bloque</SLabel>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>Métricas clave de cada bloque académico para identificar tendencias y variaciones entre periodos.</div>
+          </div>
+        </div>
+        <DataTable
+          headers={['Periodo-Bloque', 'Consultas', 'Usuarios', 'Prom. cons./usr', '% Sin resp.', 'Cursos activos', 'Temática principal']}
+          rows={porPeriodo.map(r => [
+            <strong style={{ color: C.accent }}>{r.label}</strong>,
+            <span style={{ color: C.text, fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>{fmtNum(r.consultas)}</span>,
+            fmtNum(r.usuarios),
+            <span style={{ color: r.promConsUser >= 7 ? C.red : r.promConsUser >= 5 ? C.amber : C.green, fontWeight: 600 }}>{r.promConsUser}</span>,
+            <span style={{ color: r.pctSinResp > 10 ? C.red : r.pctSinResp > 5 ? C.amber : C.muted }}>{r.pctSinResp}%</span>,
+            fmtNum(r.cursos),
+            <span style={{ color: C.muted, fontSize: 11 }}>{r.tematicaTop}</span>
+          ])}
+          maxH={300}
+        />
+      </Card>
+
+      {/* Gráfico de barras comparativo por métrica */}
+      <Card>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+          <SLabel style={{ margin: 0 }}>Comparativa visual por métrica</SLabel>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {metricas.map(m => (
+              <button key={m.id} style={btnStyle(metrica === m.id)} onClick={() => setMetrica(m.id)}>{m.label}</button>
+            ))}
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={260}>
+          <BarChart data={porPeriodo} margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+            <XAxis dataKey="label" tick={{ fill: C.textDim, fontSize: 11 }} />
+            <YAxis tick={{ fill: C.textDim, fontSize: 11 }} />
+            <TT />
+            <Bar dataKey={metrica} radius={[6,6,0,0]} label={{ position: 'top', fill: C.textDim, fontSize: 11, fontWeight: 600 }}>
+              {porPeriodo.map((_, i) => <Cell key={i} fill={PAL[i % PAL.length]} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+        <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
+          📌 Selecciona una métrica arriba para cambiar el gráfico. El promedio cons./usuario indica el nivel de dependencia al Tutor IA por bloque.
+        </div>
+      </Card>
+
+      {/* Evolución semanal comparativa */}
+      <Card>
+        <SLabel>Evolución semanal — comparativa entre periodos</SLabel>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 14 }}>
+          Muestra cómo varía el volumen de consultas semana a semana en cada periodo-bloque. Útil para identificar picos de demanda (semanas de exámenes, entregas, etc.).
+        </div>
+        {semanalComp.data.length > 0 ? (
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={semanalComp.data} margin={{ top: 10, right: 30, bottom: 10, left: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+              <XAxis dataKey="semana" tick={{ fill: C.textDim, fontSize: 12 }} />
+              <YAxis tick={{ fill: C.textDim, fontSize: 11 }} />
+              <TT />
+              <Legend wrapperStyle={{ fontSize: 11, color: C.textDim, paddingTop: 12 }} />
+              {semanalComp.periodos.map((p, i) => (
+                <Line key={p} type="monotone" dataKey={p} stroke={PAL[i % PAL.length]}
+                  strokeWidth={2.5} dot={{ r: 4, stroke: C.bg, strokeWidth: 1.5 }}
+                  activeDot={{ r: 6 }} connectNulls />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <div style={{ color: C.muted, padding: 30, textAlign: 'center', fontSize: 13 }}>Sin datos semanales disponibles</div>
+        )}
+      </Card>
+
+      {/* Temáticas por periodo */}
+      <Card>
+        <SLabel>Temáticas por periodo-bloque</SLabel>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 14 }}>
+          Distribución de temáticas de consulta en cada bloque académico. Permite detectar si los temas varían entre periodos o si hay temáticas recurrentes.
+        </div>
+        <DataTable
+          headers={['Temática', ...tematicasComp.periodos, 'Total']}
+          rows={tematicasComp.data.slice(0, 20).map(r => {
+            const total = tematicasComp.periodos.reduce((s,p) => s + (r[p]||0), 0)
+            return [
+              <span style={{ color: C.accent, fontWeight: 600 }}>{r.tematica}</span>,
+              ...tematicasComp.periodos.map(p => (
+                r[p] ? <span style={{ color: C.textDim, fontFamily: 'JetBrains Mono, monospace' }}>{fmtNum(r[p])}</span> : <span style={{ color: C.border }}>—</span>
+              )),
+              <strong style={{ color: C.text }}>{fmtNum(total)}</strong>
+            ]
+          })}
+          maxH={460}
+        />
+      </Card>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // CARGA DESDE GOOGLE SHEETS
 // ═══════════════════════════════════════════════════════════════════════════
 const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSv6HB5-J_8Gqh9RctyZRLPlq8Wi8UVUl59HxdW2WiOHGV15WNr6ddLmcf0VOoLxWhhkd4Ncp6il1_g/pub?output=csv'
@@ -1325,6 +1526,7 @@ const TABS = [
   { id: 'temporalidad', label: 'Temporalidad' },
   { id: 'tematicas',    label: 'Temáticas' },
   { id: 'usuarios',     label: 'Usuarios' },
+  { id: 'comparativa',  label: '📊 Comparativa' },
   { id: 'calidad',      label: 'Calidad' },
 ]
 
@@ -1434,7 +1636,18 @@ export default function App() {
           <label style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>Semana</label>
           <select value={fSemana} onChange={e => setFSemana(e.target.value)} style={inputStyle}>
             <option value="todas">Todas</option>
-            {Array.from({ length: 16 }, (_, i) => i + 1).map(s => <option key={s} value={s}>Sem {s}</option>)}
+            {(() => {
+              // Calcular máximo de semanas según bloque seleccionado
+              let maxSem = 8
+              if (fBloque !== 'todos' && fPeriodo !== 'todos') {
+                const key = `${fPeriodo} ${fBloque}`
+                const cal = calendarioUC[key]
+                if (cal) maxSem = Math.ceil((cal.fin - cal.inicio) / (7 * 86400000))
+              }
+              return Array.from({ length: Math.min(maxSem, 10) }, (_, i) => i + 1).map(s =>
+                <option key={s} value={s}>Sem {s}</option>
+              )
+            })()}
           </select>
 
           <label style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>Curso</label>
@@ -1468,6 +1681,7 @@ export default function App() {
         {tab === 'temporalidad'  && <TabTemporalidad fd={fd} calendario={calendario} />}
         {tab === 'tematicas'     && <TabTematicas data={data} setData={setData} />}
         {tab === 'usuarios'      && <TabUsuarios fd={fd} />}
+        {tab === 'comparativa'   && <TabComparativa data={data} calendarioUC={calendarioUC} />}
         {tab === 'calidad'       && <TabCalidad fd={fd} totalCargados={totalCargados} calendarioUC={calendarioUC} />}
       </div>
     </div>
