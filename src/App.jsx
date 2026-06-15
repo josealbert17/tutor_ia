@@ -129,11 +129,11 @@ function normalizeRows(raw) {
       esInvalido: calidad.invalido,
       motivoInvalido: calidad.motivo,
       sinRespuesta: false,
-      // Clasificación IA
-      tematica: '',
-      subtema: '',
-      tipo: '',
-      profundidad: '',
+      // Clasificación IA — lee del Sheet si ya existe
+      tematica:    String(col("TEMATICA", "tematica", "temática") || "").trim(),
+      subtema:     String(col("SUBTEMA", "subtema") || "").trim(),
+      tipo:        String(col("TIPO", "tipo") || "").trim(),
+      profundidad: String(col("PROFUNDIDAD", "profundidad") || "").trim(),
     }
   })
   .filter(r => r.consulta || r.userId) // mantener registros aunque sean inválidos (para calidad)
