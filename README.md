@@ -1,4 +1,4 @@
-# Dashboard Tutor IA
+# Dashboard Tutor IA — Universidad Continental
 
 Herramienta de análisis y visualización de consultas realizadas al Tutor IA institucional.
 
