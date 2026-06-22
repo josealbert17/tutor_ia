@@ -37,13 +37,32 @@ const HEAT_PAL = ['#0a1426', '#1e3a5f', '#1e4a8a', '#2563eb', '#3b82f6', '#60a5f
 // CALENDARIO ACADÉMICO - se calcula dinámicamente desde los datos
 // ═══════════════════════════════════════════════════════════════════════════
 // CALENDARIO ACADEMICO UC - Fallback hardcodeado (se sobreescribe con datos del Sheet)
-const CALENDARIO_UC_DEFAULT = {
-  '202520 VV1': { label: '202520 Bloque A', inicio: new Date('2025-08-18'), fin: new Date('2025-10-12') },
-  '202520 VV2': { label: '202520 Bloque B', inicio: new Date('2025-10-13'), fin: new Date('2025-12-07') },
-  '202600 VV1': { label: '202600 Bloque A', inicio: new Date('2026-01-02'), fin: new Date('2026-02-26') },
-  '202610 VV1': { label: '202610 Bloque A', inicio: new Date('2026-03-16'), fin: new Date('2026-05-10') },
-  '202610 VV2': { label: '202610 Bloque B', inicio: new Date('2026-05-18'), fin: new Date('2026-07-12') },
+// Regla: el número al final del código determina el bloque (1=Bloque A, 2=Bloque B)
+// Modalidades: VV=Virtual, WA=Semipresencial Arequipa, WL=Lima, WC=Cusco, WH=Huancayo
+// Todos los códigos con el mismo número comparten fechas dentro del mismo periodo
+const BLOQUES_UC = {
+  '202520-1': { label: '202520 Bloque A', inicio: new Date('2025-08-18'), fin: new Date('2025-10-12') },
+  '202520-2': { label: '202520 Bloque B', inicio: new Date('2025-10-13'), fin: new Date('2025-12-07') },
+  '202600-1': { label: '202600 Bloque A', inicio: new Date('2026-01-02'), fin: new Date('2026-02-26') },
+  '202610-1': { label: '202610 Bloque A', inicio: new Date('2026-03-16'), fin: new Date('2026-05-10') },
+  '202610-2': { label: '202610 Bloque B', inicio: new Date('2026-05-18'), fin: new Date('2026-07-12') },
 }
+
+// Modalidades conocidas: VV, WA, WL, WC, WH — el número es siempre el último caracter
+const MODALIDADES = ['VV','WA','WL','WC','WH']
+
+function expandirCalendario(bloques) {
+  const cal = {}
+  Object.entries(bloques).forEach(([key, v]) => {
+    const [periodo, num] = key.split('-')
+    MODALIDADES.forEach(mod => {
+      cal[`${periodo} ${mod}${num}`] = v
+    })
+  })
+  return cal
+}
+
+const CALENDARIO_UC_DEFAULT = expandirCalendario(BLOQUES_UC)
 
 // URL de la hoja CALENDARIO_ACADEMICO publicada como CSV
 const CALENDARIO_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSv6HB5-J_8Gqh9RctyZRLPlq8Wi8UVUl59HxdW2WiOHGV15WNr6ddLmcf0VOoLxWhhkd4Ncp6il1_g/pub?gid=2094941470&single=true&output=csv'
@@ -75,18 +94,21 @@ async function cargarCalendarioDesdeSheet() {
     const iInicio    = headers.findIndex(h => h.includes('INICIO'))
     const iFin       = headers.findIndex(h => h.includes('FIN'))
     if (iPerBloque < 0 || iInicio < 0 || iFin < 0) return CALENDARIO_UC_DEFAULT
-    const cal = {}
+    const bloques = {}
     lines.slice(1).forEach(cols => {
-      const periodoBloque = cols[iPerBloque]
-      const codigo        = iCodigo >= 0 ? cols[iCodigo] : ''
+      const periodoBloque = cols[iPerBloque]  // ej: "202520-A"
+      const codigo        = iCodigo >= 0 ? cols[iCodigo] : ''  // ej: "VV1"
       const inicio        = parseFechaUC(cols[iInicio])
       const fin           = parseFechaUC(cols[iFin])
       if (!periodoBloque || !inicio || !fin) return
-      // Construir clave: "202520 VV1" desde "202520-A" + "VV1"
-      const clave = periodoBloque.replace('-A',''  ).replace('-B','') + ' ' + codigo
-      cal[clave] = { label: periodoBloque, inicio, fin }
+      // Extraer numero del bloque del código (último caracter de "VV1" → "1")
+      const num = codigo ? codigo.slice(-1) : ''
+      const periodo = periodoBloque.replace(/-[AB]$/, '')  // "202520-A" → "202520"
+      const bKey = `${periodo}-${num}`  // "202520-1"
+      bloques[bKey] = { label: periodoBloque, inicio, fin }
     })
-    return Object.keys(cal).length > 0 ? cal : CALENDARIO_UC_DEFAULT
+    // Expandir a todas las modalidades
+    return Object.keys(bloques).length > 0 ? expandirCalendario(bloques) : CALENDARIO_UC_DEFAULT
   } catch {
     return CALENDARIO_UC_DEFAULT
   }
@@ -954,10 +976,11 @@ function TabCalidad({ fd, totalCargados, calendarioUC }) {
 // ═══════════════════════════════════════════════════════════════════════════
 const STORAGE_KEY = 'tutor_ia_clasificaciones_v1'
 
-function TabTematicas({ data, setData }) {
+function TabTematicas({ data, fd, setData }) {
   const [estado, setEstado] = useState('idle') // idle | procesando | listo | error
   const [progreso, setProgreso] = useState({ actual: 0, total: 0, errores: 0 })
   const [errorMsg, setErrorMsg] = useState('')
+  const [subtemaActivo, setSubtemaActivo] = useState(null) // para filtrar tabla al hacer clic
 
   // Recuperar clasificaciones guardadas al montar
   useEffect(() => {
@@ -981,32 +1004,35 @@ function TabTematicas({ data, setData }) {
 
   const clasificadas = useMemo(() => data.filter(r => r.tematica && !r.esInvalido), [data])
   const validasSinClasificar = useMemo(() => data.filter(r => !r.tematica && !r.esInvalido), [data])
+  // Versión filtrada para visualizaciones (respeta filtros globales)
+  const clasificadasFd = useMemo(() => (fd || data).filter(r => r.tematica && !r.esInvalido), [fd, data])
 
+  // Visualizaciones usan clasificadasFd (respeta filtros globales)
   const temasMap = useMemo(() => {
     const m = {}
-    clasificadas.forEach(r => {
+    clasificadasFd.forEach(r => {
       if (!m[r.subtema || 'Sin subtema']) m[r.subtema || 'Sin subtema'] = { subtema: r.subtema, tematica: r.tematica, count: 0 }
       m[r.subtema || 'Sin subtema'].count++
     })
     return Object.values(m).sort((a, b) => b.count - a.count)
-  }, [clasificadas])
+  }, [clasificadasFd])
 
   const distribucion = useMemo(() => {
     const m = {}
-    clasificadas.forEach(r => { m[r.tematica] = (m[r.tematica] || 0) + 1 })
+    clasificadasFd.forEach(r => { m[r.tematica] = (m[r.tematica] || 0) + 1 })
     return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
-  }, [clasificadas])
+  }, [clasificadasFd])
 
   const tematicaPorCurso = useMemo(() => {
     const m = {}
-    clasificadas.forEach(r => {
+    clasificadasFd.forEach(r => {
       const k = `${r.tematica}||${r.nombreCurso}`
       if (!m[k]) m[k] = { tematica: r.tematica, curso: r.nombreCurso, count: 0, ejemplos: [] }
       m[k].count++
       if (m[k].ejemplos.length < 3 && r.consulta.length > 20) m[k].ejemplos.push(r.consulta)
     })
     return Object.values(m).sort((a, b) => b.count - a.count)
-  }, [clasificadas])
+  }, [clasificadasFd])
 
   // Clasificación paralela (3 lotes simultáneos de 25 = 75 consultas en paralelo)
   const iniciarClasificacion = async () => {
@@ -1153,7 +1179,7 @@ function TabTematicas({ data, setData }) {
               {estado === 'procesando' ? 'Clasificando con IA…' : 'Clasificación de temáticas'}
             </div>
             <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>
-              <span style={{ color: C.green }}>✓ {fmtNum(clasificadas.length)} clasificadas</span>
+              <span style={{ color: C.green }}>✓ {fmtNum(clasificadasFd.length)} clasificadas{clasificadasFd.length !== clasificadas.length ? <span style={{color:C.amber}}> (filtradas)</span> : ''}</span>
               {validasSinClasificar.length > 0 && <span style={{ color: C.amber }}> · {fmtNum(validasSinClasificar.length)} pendientes</span>}
               {progreso.errores > 0 && <span style={{ color: C.red }}> · {fmtNum(progreso.errores)} errores</span>}
             </div>
@@ -1222,30 +1248,87 @@ function TabTematicas({ data, setData }) {
 
             <Card>
               <SLabel>Temas más consultados</SLabel>
-              <div style={{ maxHeight: 380, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {temasMap.slice(0, 30).map((t, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: C.surface, borderRadius: 8, border: `1px solid ${C.border}` }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.subtema || 'Sin subtema'}</div>
-                      <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{t.tematica}</div>
-                    </div>
-                    <div style={{ background: C.accent + '22', color: C.accent2, padding: '4px 12px', borderRadius: 12, fontSize: 12, fontWeight: 700 }}>{fmtNum(t.count)}</div>
-                  </div>
-                ))}
+              <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
+                Haz clic en un tema para filtrar la tabla de abajo
               </div>
+              <div style={{ maxHeight: 360, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {temasMap.slice(0, 30).map((t, i) => {
+                  const activo = subtemaActivo === (t.subtema || 'Sin subtema')
+                  return (
+                    <div key={i}
+                      onClick={() => setSubtemaActivo(activo ? null : (t.subtema || 'Sin subtema'))}
+                      style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        padding: '10px 14px', borderRadius: 8, cursor: 'pointer', transition: 'all 0.15s',
+                        background: activo ? C.accent + '22' : C.surface,
+                        border: `1px solid ${activo ? C.accent : C.border}`,
+                      }}
+                      onMouseEnter={e => { if (!activo) e.currentTarget.style.background = C.borderHi + '44' }}
+                      onMouseLeave={e => { if (!activo) e.currentTarget.style.background = C.surface }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: activo ? C.accent2 : C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {t.subtema || 'Sin subtema'}
+                        </div>
+                        <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{t.tematica}</div>
+                      </div>
+                      <div style={{ background: activo ? C.accent : C.accent + '22', color: activo ? '#fff' : C.accent2, padding: '4px 12px', borderRadius: 12, fontSize: 12, fontWeight: 700, transition: 'all 0.15s' }}>
+                        {fmtNum(t.count)}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              {subtemaActivo && (
+                <button onClick={() => setSubtemaActivo(null)}
+                  style={{ marginTop: 8, background: 'transparent', border: `1px solid ${C.border}`, color: C.muted, borderRadius: 6, padding: '5px 12px', fontSize: 11, cursor: 'pointer' }}>
+                  ✕ Quitar filtro
+                </button>
+              )}
             </Card>
           </div>
 
           <Card>
-            <SLabel>Tabla temática × curso</SLabel>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <div>
+                <SLabel style={{ margin: 0 }}>Tabla temática × curso</SLabel>
+                {subtemaActivo && (
+                  <div style={{ fontSize: 12, color: C.accent, marginTop: 4 }}>
+                    🔍 Filtrando por subtema: <strong>"{subtemaActivo}"</strong>
+                    <button onClick={() => setSubtemaActivo(null)}
+                      style={{ marginLeft: 10, background: 'transparent', border: 'none', color: C.muted, cursor: 'pointer', fontSize: 11 }}>
+                      ✕ quitar
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
             <DataTable
               headers={['Temática', 'Curso', 'Consultas', 'Ejemplo']}
-              rows={tematicaPorCurso.slice(0, 100).map(r => [
-                <span style={{ color: C.accent, fontWeight: 600 }}>{r.tematica}</span>,
-                r.curso,
-                <span style={{ color: C.accent2, fontWeight: 700 }}>{fmtNum(r.count)}</span>,
-                <span style={{ color: C.muted, fontStyle: 'italic' }}>"{(r.ejemplos[0] || '').slice(0, 80)}{r.ejemplos[0]?.length > 80 ? '…' : ''}"</span>
-              ])}
+              rows={(() => {
+                // Si hay subtema activo, filtrar clasificadas por ese subtema y agrupar por temática+curso
+                if (subtemaActivo) {
+                  const filtradas = clasificadasFd.filter(r => (r.subtema || 'Sin subtema') === subtemaActivo)
+                  const m = {}
+                  filtradas.forEach(r => {
+                    const k = `${r.tematica}||${r.nombreCurso}`
+                    if (!m[k]) m[k] = { tematica: r.tematica, curso: r.nombreCurso, count: 0, ejemplos: [] }
+                    m[k].count++
+                    if (m[k].ejemplos.length < 2 && r.consulta.length > 10) m[k].ejemplos.push(r.consulta)
+                  })
+                  return Object.values(m).sort((a,b) => b.count - a.count).map(r => [
+                    <span style={{ color: C.accent, fontWeight: 600 }}>{r.tematica}</span>,
+                    r.curso,
+                    <span style={{ color: C.accent2, fontWeight: 700 }}>{fmtNum(r.count)}</span>,
+                    <span style={{ color: C.muted, fontStyle: 'italic' }}>"{(r.ejemplos[0] || '').slice(0, 80)}{(r.ejemplos[0] || '').length > 80 ? '…' : ''}"</span>
+                  ])
+                }
+                return tematicaPorCurso.slice(0, 100).map(r => [
+                  <span style={{ color: C.accent, fontWeight: 600 }}>{r.tematica}</span>,
+                  r.curso,
+                  <span style={{ color: C.accent2, fontWeight: 700 }}>{fmtNum(r.count)}</span>,
+                  <span style={{ color: C.muted, fontStyle: 'italic' }}>"{(r.ejemplos[0] || '').slice(0, 80)}{r.ejemplos[0]?.length > 80 ? '…' : ''}"</span>
+                ])
+              })()}
               maxH={500}
             />
           </Card>
@@ -1258,11 +1341,12 @@ function TabTematicas({ data, setData }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB: COMPARATIVA — comparación entre periodos y bloques
 // ═══════════════════════════════════════════════════════════════════════════
-function TabComparativa({ data, calendarioUC }) {
-  const [ejeX, setEjeX] = useState('periodoBloque') // periodoBloque | semana
-  const [metrica, setMetrica] = useState('consultas') // consultas | usuarios | sinResp | tematica
+function TabComparativa({ data, fd, calendarioUC }) {
+  const [ejeX, setEjeX] = useState('periodoBloque')
+  const [metrica, setMetrica] = useState('consultas')
 
-  const validas = useMemo(() => (data || []).filter(r => !r.esInvalido), [data])
+  // Usa fd (filtrado) para visualizaciones, data completo para clasificación
+  const validas = useMemo(() => (fd || data || []).filter(r => !r.esInvalido), [fd, data])
 
   // Datos por periodo-bloque
   const porPeriodo = useMemo(() => {
@@ -1679,9 +1763,9 @@ export default function App() {
         {tab === 'cursos'        && <TabCursos fd={fd} />}
         {tab === 'nrc'           && <TabNRC fd={fd} />}
         {tab === 'temporalidad'  && <TabTemporalidad fd={fd} calendario={calendario} />}
-        {tab === 'tematicas'     && <TabTematicas data={data} setData={setData} />}
+        {tab === 'tematicas'     && <TabTematicas data={data} fd={fd} setData={setData} />}
         {tab === 'usuarios'      && <TabUsuarios fd={fd} />}
-        {tab === 'comparativa'   && <TabComparativa data={data} calendarioUC={calendarioUC} />}
+        {tab === 'comparativa'   && <TabComparativa data={data} fd={fd} calendarioUC={calendarioUC} />}
         {tab === 'calidad'       && <TabCalidad fd={fd} totalCargados={totalCargados} calendarioUC={calendarioUC} />}
       </div>
     </div>
